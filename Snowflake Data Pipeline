@@ -388,39 +388,4 @@ GROUP BY date
 ORDER BY date;
 
 
-git init
-
-
-
-
-SELECT * FROM staging.dim_campaign;
-
-SELECT * FROM raw.dim_campaign;
-
-SELECT * FROM staging.FACT_AD_PERFORMANCE_DAILY;
-
-SELECT * FROM raw.FACT_AD_PERFORMANCE_DAILY;
-
-select d.campaign_name, a.* from raw.fact_ad_performance_daily a 
- join raw.dim_ad b 
-   ON a.ad_id = b.ad_id
- join raw.dim_ad_group c 
-   ON b.ad_group_id = c.ad_group_id 
- join raw.dim_campaign d 
-   ON c.campaign_id = d.campaign_id
-where a.ad_id = 1
-;
-
-UPDATE RAW.DIM_CAMPAIGN SET CAMPAIGN_ID = 11 WHERE CAMPAIGN_ID = 12;
-
-SELECT * FROM RAW_DIM_CAMPAIGN_STREAM;
-
-select * from raw.raw_fact_ad_stream;
-
-
-
-
-
-
-
 
