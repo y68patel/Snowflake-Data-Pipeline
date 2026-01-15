@@ -1,0 +1,426 @@
+sql/create_tables.sql
+
+CREATE OR REPLACE DATABASE MARKETING_ANALYTICS;
+
+CREATE OR REPLACE SCHEMA MARKETING_ANALYTICS.RAW;
+CREATE OR REPLACE SCHEMA MARKETING_ANALYTICS.STAGING;
+CREATE OR REPLACE SCHEMA MARKETING_ANALYTICS.ANALYTICS;
+
+
+CREATE OR REPLACE TABLE RAW.DIM_CAMPAIGN (
+    campaign_id       INTEGER,
+    campaign_name     STRING,
+    channel           STRING
+);
+
+CREATE OR REPLACE TABLE RAW.DIM_AD_GROUP (
+    ad_group_id       INTEGER,
+    campaign_id       INTEGER,
+    ad_group_name     STRING
+);
+
+CREATE OR REPLACE TABLE RAW.DIM_AD (
+    ad_id             INTEGER,
+    ad_group_id       INTEGER,
+    ad_name           STRING
+);
+
+CREATE OR REPLACE TABLE RAW.FACT_AD_PERFORMANCE_DAILY (
+    date              DATE,
+    ad_id             INTEGER,
+    country           STRING,
+    city              STRING,
+    device            STRING,
+    impressions       INTEGER,
+    clicks            INTEGER,
+    conversions       INTEGER,
+    cost              NUMBER(12,2)
+);
+
+
+CREATE OR REPLACE FILE FORMAT RAW.marketing_csv_format
+  TYPE = 'CSV'
+  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+  SKIP_HEADER = 1
+  NULL_IF = ('NULL', 'null');
+
+CREATE OR REPLACE STAGE marketing_stage
+FILE_FORMAT = marketing_csv_format;
+
+
+COPY INTO RAW.DIM_CAMPAIGN
+FROM @marketing_stage/dim_campaign.csv
+ON_ERROR = 'CONTINUE';
+
+
+Select * FROM DIM_CAMPAIGN;
+
+COPY INTO RAW.DIM_AD_GROUP
+FROM @marketing_stage/dim_ad_group.csv
+ON_ERROR = 'CONTINUE';
+
+Select * FROM DIM_AD_GROUP;
+
+COPY INTO RAW.DIM_AD
+FROM @marketing_stage/dim_ad.csv
+ON_ERROR = 'CONTINUE';
+
+Select * FROM DIM_AD;
+
+COPY INTO RAW.FACT_AD_PERFORMANCE_DAILY
+FROM @marketing_stage/fact_ad_performance_daily.csv
+ON_ERROR = 'CONTINUE';
+
+Select * FROM FACT_AD_PERFORMANCE_DAILY;
+
+CREATE OR REPLACE TABLE STAGING.DIM_CAMPAIGN (
+    campaign_id       INTEGER       NOT NULL,
+    campaign_name     STRING,
+    channel           STRING,
+    updated_at        TIMESTAMP      DEFAULT CURRENT_TIMESTAMP(),
+    CONSTRAINT pk_dim_campaign PRIMARY KEY (campaign_id)
+);
+
+CREATE OR REPLACE TABLE STAGING.DIM_AD_GROUP (
+    ad_group_id       INTEGER       NOT NULL,
+    campaign_id       INTEGER       NOT NULL,
+    ad_group_name     STRING,
+    updated_at        TIMESTAMP      DEFAULT CURRENT_TIMESTAMP(),
+    CONSTRAINT pk_dim_ad_group PRIMARY KEY (ad_group_id)
+);
+
+CREATE OR REPLACE TABLE STAGING.DIM_AD (
+    ad_id             INTEGER       NOT NULL,
+    ad_group_id       INTEGER       NOT NULL,
+    ad_name           STRING,
+    updated_at        TIMESTAMP      DEFAULT CURRENT_TIMESTAMP(),
+    CONSTRAINT pk_dim_ad PRIMARY KEY (ad_id)
+);
+
+CREATE OR REPLACE TABLE STAGING.FACT_AD_PERFORMANCE_DAILY (
+    date              DATE          NOT NULL,
+    ad_id             INTEGER       NOT NULL,
+    country           STRING        NOT NULL,
+    city              STRING        NOT NULL,
+    device            STRING        NOT NULL,
+    impressions       INTEGER,
+    clicks            INTEGER,
+    conversions       INTEGER,
+    cost              NUMBER(12,2),
+    updated_at        TIMESTAMP      DEFAULT CURRENT_TIMESTAMP(),
+    CONSTRAINT pk_fact_ad_perf PRIMARY KEY
+        (date, ad_id, country, city, device)
+);
+
+select * from RAW.DIM_CAMPAIGN ;
+update RAW.DIM_CAMPAIGN  set campaign_id = 12 where campaign_name = 'Test Campaign 11';
+
+
+select * from RAW_DIM_CAMPAIGN_STREAM ;
+
+select * from dim_campaign;
+
+CREATE OR REPLACE STREAM RAW_DIM_CAMPAIGN_STREAM
+ON TABLE RAW.DIM_CAMPAIGN 
+SHOW_INITIAL_ROWS = TRUE;
+
+Select * FROM RAW_DIM_CAMPAIGN_STREAM;
+
+CREATE OR REPLACE STREAM RAW_DIM_AD_GROUP_STREAM
+ON TABLE RAW.DIM_AD_GROUP
+SHOW_INITIAL_ROWS = TRUE;
+
+Select * FROM RAW_DIM_AD_GROUP_STREAM;
+
+CREATE OR REPLACE STREAM RAW_DIM_AD_STREAM
+ON TABLE RAW.DIM_AD
+SHOW_INITIAL_ROWS = TRUE;
+
+Select * FROM RAW_DIM_AD_STREAM;
+
+CREATE OR REPLACE STREAM RAW_FACT_AD_STREAM
+ON TABLE RAW.FACT_AD_PERFORMANCE_DAILY 
+SHOW_INITIAL_ROWS = TRUE;
+
+
+MERGE INTO STAGING.DIM_CAMPAIGN tgt
+USING (
+    SELECT campaign_id, campaign_name, channel
+    FROM RAW_DIM_CAMPAIGN_STREAM
+) src
+ON tgt.campaign_id = src.campaign_id
+
+WHEN MATCHED THEN
+    UPDATE SET
+        tgt.campaign_name = src.campaign_name,
+        tgt.channel = src.channel,
+        tgt.updated_at = CURRENT_TIMESTAMP()
+
+WHEN NOT MATCHED THEN
+    INSERT (campaign_id, campaign_name, channel)
+    VALUES (src.campaign_id, src.campaign_name, src.channel);
+
+SELECT *
+FROM RAW.FACT_AD_PERFORMANCE_DAILY
+WHERE clicks > impressions;
+
+CREATE OR REPLACE TASK STAGING.LOAD_DIM_CAMPAIGN_TASK
+WAREHOUSE = COMPUTE_WH
+SCHEDULE = 'USING CRON 0 2 * * * UTC'
+AS
+MERGE INTO STAGING.DIM_CAMPAIGN tgt
+USING (
+    SELECT campaign_id, campaign_name, channel
+    FROM RAW_DIM_CAMPAIGN_STREAM
+) src
+ON tgt.campaign_id = src.campaign_id
+WHEN MATCHED THEN UPDATE SET
+    campaign_name = src.campaign_name,
+    channel = src.channel,
+    updated_at = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED THEN INSERT
+    (campaign_id, campaign_name, channel)
+VALUES
+    (src.campaign_id, src.campaign_name, src.channel);
+    
+
+CREATE OR REPLACE TASK STAGING.LOAD_DIM_AD_GROUP_TASK
+WAREHOUSE = COMPUTE_WH
+AFTER STAGING.LOAD_DIM_CAMPAIGN_TASK
+AS
+MERGE INTO STAGING.DIM_AD_GROUP tgt
+USING (
+    SELECT
+        ad_group_id,
+        campaign_id,
+        ad_group_name
+    FROM RAW_DIM_AD_GROUP_STREAM
+) src
+ON tgt.ad_group_id = src.ad_group_id
+
+WHEN MATCHED THEN UPDATE SET
+    campaign_id = src.campaign_id,
+    ad_group_name = src.ad_group_name,
+    updated_at = CURRENT_TIMESTAMP()
+
+WHEN NOT MATCHED THEN INSERT
+    (ad_group_id, campaign_id, ad_group_name)
+VALUES
+    (src.ad_group_id, src.campaign_id, src.ad_group_name);
+    
+
+CREATE OR REPLACE TASK STAGING.LOAD_DIM_AD_TASK
+WAREHOUSE = COMPUTE_WH
+AFTER STAGING.LOAD_DIM_AD_GROUP_TASK
+AS
+MERGE INTO STAGING.DIM_AD tgt
+USING (
+    SELECT
+        ad_id,
+        ad_group_id,
+        ad_name
+    FROM RAW_DIM_AD_STREAM
+) src
+ON tgt.ad_id = src.ad_id
+
+WHEN MATCHED THEN UPDATE SET
+    ad_group_id = src.ad_group_id,
+    ad_name = src.ad_name,
+    updated_at = CURRENT_TIMESTAMP()
+
+WHEN NOT MATCHED THEN INSERT
+    (ad_id, ad_group_id, ad_name)
+VALUES
+    (src.ad_id, src.ad_group_id, src.ad_name);
+    
+
+CREATE OR REPLACE TASK STAGING.LOAD_FACT_AD_PERFORMANCE_DAILY_TASK
+WAREHOUSE = COMPUTE_WH
+AFTER STAGING.LOAD_DIM_AD_TASK
+AS
+MERGE INTO STAGING.FACT_AD_PERFORMANCE_DAILY tgt
+USING (
+    SELECT
+        date,
+        ad_id,
+        country,
+        city,
+        device,
+        impressions,
+        clicks,
+        conversions,
+        cost
+    FROM RAW_FACT_AD_STREAM
+) src
+ON tgt.date = src.date
+AND tgt.ad_id = src.ad_id
+AND tgt.country = src.country
+AND tgt.city = src.city
+AND tgt.device = src.device
+WHEN MATCHED THEN UPDATE SET
+    tgt.impressions = src.impressions,
+    tgt.clicks = src.clicks,
+    tgt.conversions = src.conversions,
+    tgt.cost = src.cost,
+    tgt.updated_at = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED THEN INSERT
+    (
+        date,
+        ad_id,
+        country,
+        city,
+        device,
+        impressions,
+        clicks,
+        conversions,
+        cost
+    )
+VALUES
+    (
+        src.date,
+        src.ad_id,
+        src.country,
+        src.city,
+        src.device,
+        src.impressions,
+        src.clicks,
+        src.conversions,
+        src.cost
+    );
+
+    
+ALTER TASK STAGING.LOAD_DIM_CAMPAIGN_TASK RESUME;
+ALTER TASK STAGING.LOAD_DIM_AD_GROUP_TASK RESUME;
+ALTER TASK STAGING.LOAD_DIM_AD_TASK RESUME;
+ALTER TASK STAGING.LOAD_FACT_AD_PERFORMANCE_DAILY_TASK RESUME;
+
+
+DESC TABLE RAW.DIM_CAMPAIGN;
+
+INSERT INTO RAW.DIM_CAMPAIGN (campaign_id, campaign_name, channel)
+VALUES (11, 'Test Campaign 11', 'Social');
+
+SELECT * FROM RAW_DIM_CAMPAIGN_STREAM;
+
+EXECUTE TASK LOAD_DIM_CAMPAIGN_TASK;
+SELECT * FROM STAGING.DIM_CAMPAIGN WHERE campaign_id = 11;
+
+
+INSERT INTO RAW.FACT_AD_PERFORMANCE_DAILY
+VALUES (
+    CURRENT_DATE,
+    11,
+    'Canada',
+    'Toronto',
+    'Mobile',
+    100,
+    15,
+    3,
+    20.00
+);
+
+EXECUTE TASK STAGING.LOAD_FACT_AD_PERFORMANCE_DAILY_TASK;
+
+SELECT * FROM STAGING.FACT_AD_PERFORMANCE_DAILY WHERE ad_id = 11;
+
+EXECUTE TASK STAGING.LOAD_DIM_AD_GROUP_TASK;
+
+EXECUTE TASK STAGING.LOAD_DIM_AD_TASK;
+
+
+CREATE OR REPLACE TASK STAGING.LOAD_ANALYTICS_FACT_CAMPAIGN_DAILY_TASK
+WAREHOUSE = COMPUTE_WH
+AFTER STAGING.LOAD_FACT_AD_PERFORMANCE_DAILY_TASK
+AS
+INSERT OVERWRITE INTO ANALYTICS.FACT_CAMPAIGN_PERFORMANCE_DAILY
+SELECT
+    f.date,
+    c.campaign_id,
+    c.campaign_name,
+    c.channel,
+    f.device,
+    f.country,
+    f.city,
+    SUM(f.impressions),
+    SUM(f.clicks),
+    SUM(f.conversions),
+    SUM(f.cost)
+FROM STAGING.FACT_AD_PERFORMANCE_DAILY f
+JOIN STAGING.DIM_AD a ON f.ad_id = a.ad_id
+JOIN STAGING.DIM_AD_GROUP ag ON a.ad_group_id = ag.ad_group_id
+JOIN STAGING.DIM_CAMPAIGN c ON ag.campaign_id = c.campaign_id
+GROUP BY
+    f.date,
+    c.campaign_id,
+    c.campaign_name,
+    c.channel,
+    f.device,
+    f.country,
+    f.city;
+
+
+
+SELECT
+    campaign_name,
+    SUM(impressions) AS impressions,
+    SUM(clicks) AS clicks,
+    SUM(conversions) AS conversions,
+    SUM(total_spend) AS spend
+FROM ANALYTICS.FACT_CAMPAIGN_PERFORMANCE_DAILY
+GROUP BY campaign_name;
+
+
+SELECT
+    channel,
+    SUM(impressions) AS impressions,
+    SUM(clicks) AS clicks,
+    SUM(total_spend) AS spend
+FROM ANALYTICS.FACT_CAMPAIGN_PERFORMANCE_DAILY
+GROUP BY channel;
+
+
+SELECT
+    date,
+    SUM(clicks) AS clicks,
+    SUM(conversions) AS conversions
+FROM ANALYTICS.FACT_CAMPAIGN_PERFORMANCE_DAILY
+GROUP BY date
+ORDER BY date;
+
+
+git init
+
+
+
+
+SELECT * FROM staging.dim_campaign;
+
+SELECT * FROM raw.dim_campaign;
+
+SELECT * FROM staging.FACT_AD_PERFORMANCE_DAILY;
+
+SELECT * FROM raw.FACT_AD_PERFORMANCE_DAILY;
+
+select d.campaign_name, a.* from raw.fact_ad_performance_daily a 
+ join raw.dim_ad b 
+   ON a.ad_id = b.ad_id
+ join raw.dim_ad_group c 
+   ON b.ad_group_id = c.ad_group_id 
+ join raw.dim_campaign d 
+   ON c.campaign_id = d.campaign_id
+where a.ad_id = 1
+;
+
+UPDATE RAW.DIM_CAMPAIGN SET CAMPAIGN_ID = 11 WHERE CAMPAIGN_ID = 12;
+
+SELECT * FROM RAW_DIM_CAMPAIGN_STREAM;
+
+select * from raw.raw_fact_ad_stream;
+
+
+
+
+
+
+
+
