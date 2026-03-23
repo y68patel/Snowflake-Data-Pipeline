@@ -1,0 +1,128 @@
+// ============================================================
+// dax_measures.dax
+// All DAX measures for the Marketing Analytics Power BI report
+// Table reference: FACT_CAMPAIGN_PERFORMANCE_DAILY
+// ============================================================
+
+
+// ──────────────────────────────────────────────────────────────
+// BASE METRICS
+// ──────────────────────────────────────────────────────────────
+
+Total Impressions =
+    SUM( FACT_CAMPAIGN_PERFORMANCE_DAILY[impressions] )
+
+Total Clicks =
+    SUM( FACT_CAMPAIGN_PERFORMANCE_DAILY[clicks] )
+
+Total Conversions =
+    SUM( FACT_CAMPAIGN_PERFORMANCE_DAILY[conversions] )
+
+Total Spend =
+    SUM( FACT_CAMPAIGN_PERFORMANCE_DAILY[total_spend] )
+
+
+// ──────────────────────────────────────────────────────────────
+// PERFORMANCE RATIOS
+// ──────────────────────────────────────────────────────────────
+
+// Click-Through Rate: what % of impressions led to a click
+CTR =
+    DIVIDE( [Total Clicks], [Total Impressions], 0 )
+
+// Conversion Rate: what % of clicks led to a conversion
+CVR =
+    DIVIDE( [Total Conversions], [Total Clicks], 0 )
+
+// Cost Per Click
+CPC =
+    DIVIDE( [Total Spend], [Total Clicks], 0 )
+
+// Cost Per Acquisition
+CPA =
+    DIVIDE( [Total Spend], [Total Conversions], 0 )
+
+// Cost Per Thousand Impressions
+CPM =
+    DIVIDE( [Total Spend] * 1000, [Total Impressions], 0 )
+
+
+// ──────────────────────────────────────────────────────────────
+// TIME INTELLIGENCE
+// Requires an active relationship between FACT[date] and DimDate[Date]
+// ──────────────────────────────────────────────────────────────
+
+Total Spend MoM % =
+VAR CurrentSpend  = [Total Spend]
+VAR PreviousSpend = CALCULATE( [Total Spend], DATEADD( DimDate[Date], -1, MONTH ) )
+RETURN
+    DIVIDE( CurrentSpend - PreviousSpend, PreviousSpend, BLANK() )
+
+Total Clicks MoM % =
+VAR CurrentClicks  = [Total Clicks]
+VAR PreviousClicks = CALCULATE( [Total Clicks], DATEADD( DimDate[Date], -1, MONTH ) )
+RETURN
+    DIVIDE( CurrentClicks - PreviousClicks, PreviousClicks, BLANK() )
+
+Total Spend YTD =
+    TOTALYTD( [Total Spend], DimDate[Date] )
+
+Total Clicks YTD =
+    TOTALYTD( [Total Clicks], DimDate[Date] )
+
+Total Conversions YTD =
+    TOTALYTD( [Total Conversions], DimDate[Date] )
+
+
+// ──────────────────────────────────────────────────────────────
+// ROLLING AVERAGES (7-day)
+// ──────────────────────────────────────────────────────────────
+
+7-Day Avg Clicks =
+    AVERAGEX(
+        DATESINPERIOD( DimDate[Date], LASTDATE( DimDate[Date] ), -7, DAY ),
+        [Total Clicks]
+    )
+
+7-Day Avg Conversions =
+    AVERAGEX(
+        DATESINPERIOD( DimDate[Date], LASTDATE( DimDate[Date] ), -7, DAY ),
+        [Total Conversions]
+    )
+
+
+// ──────────────────────────────────────────────────────────────
+// RANKING
+// ──────────────────────────────────────────────────────────────
+
+// Rank campaigns by spend within current filter context
+Campaign Spend Rank =
+    IF(
+        HASONEVALUE( FACT_CAMPAIGN_PERFORMANCE_DAILY[campaign_name] ),
+        RANKX(
+            ALLSELECTED( FACT_CAMPAIGN_PERFORMANCE_DAILY[campaign_name] ),
+            [Total Spend],
+            ,
+            DESC,
+            DENSE
+        )
+    )
+
+// Top N campaigns flag (use as visual filter, e.g. Top 5)
+Is Top 5 Campaign =
+    [Campaign Spend Rank] <= 5
+
+
+// ──────────────────────────────────────────────────────────────
+// DYNAMIC TITLES  (bind to card/chart title via field value)
+// ──────────────────────────────────────────────────────────────
+
+Selected Channel Title =
+    IF(
+        ISFILTERED( FACT_CAMPAIGN_PERFORMANCE_DAILY[channel] ),
+        "Channel: " & SELECTEDVALUE( FACT_CAMPAIGN_PERFORMANCE_DAILY[channel], "Multiple" ),
+        "All Channels"
+    )
+
+Report Last Refreshed =
+    "Last refreshed: " & FORMAT( NOW(), "DD MMM YYYY HH:MM" )

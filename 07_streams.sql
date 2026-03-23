@@ -1,0 +1,23 @@
+-- ============================================================
+-- 07_streams.sql
+-- Streams on RAW tables to capture CDC (change data capture)
+-- SHOW_INITIAL_ROWS = TRUE seeds the stream with existing rows
+-- ============================================================
+
+USE SCHEMA MARKETING_ANALYTICS.RAW;
+
+CREATE OR REPLACE STREAM RAW.RAW_DIM_CAMPAIGN_STREAM
+    ON TABLE RAW.DIM_CAMPAIGN
+    SHOW_INITIAL_ROWS = TRUE;
+
+CREATE OR REPLACE STREAM RAW.RAW_DIM_AD_GROUP_STREAM
+    ON TABLE RAW.DIM_AD_GROUP
+    SHOW_INITIAL_ROWS = TRUE;
+
+CREATE OR REPLACE STREAM RAW.RAW_DIM_AD_STREAM
+    ON TABLE RAW.DIM_AD
+    SHOW_INITIAL_ROWS = TRUE;
+
+CREATE OR REPLACE STREAM RAW.RAW_FACT_AD_STREAM
+    ON TABLE RAW.FACT_AD_PERFORMANCE_DAILY
+    SHOW_INITIAL_ROWS = TRUE;
